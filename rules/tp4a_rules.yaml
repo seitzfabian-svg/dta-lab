@@ -1,0 +1,35 @@
+meta:
+  procedure: "TP4a"
+  source: "Anlage 4 Version 63"
+  version: "63"
+  status: "draft"
+
+format:
+  type: "UNKNOWN"   # setze später: XML | FIXED | CSV
+  encoding: "UTF-8"
+
+# Sobald wir es aus der Anlage 4 entnehmen:
+# - bei FIXED: record_types + fields mit position/length
+# - bei XML: root/paths + required + datatypes
+structure:
+  record_types: []   # z.B. ["HDR", "REQ", "TRL"] oder Satzarten
+  segments: []       # optional falls Segmentstruktur
+
+fields: []
+# Beispiel-Format (wir füllen das im nächsten Schritt mit echten Regeln aus Anlage 4):
+# - name: "sender_ik"
+#   record_type: "HDR"
+#   required: true
+#   datatype: "N"          # N=Numeric, A=Alpha, AN=Alphanum (Beispiel)
+#   length: 9
+#   position: 1            # nur bei FIXED
+#   pattern: "^[0-9]{9}$"
+#   description: "Physikalische Sender IK"
+
+validation:
+  rules: []
+  # Beispiele:
+  # - id: "DATE_ORDER"
+  #   description: "Entlassdatum >= Aufnahmedatum"
+  #   when: "field_exists('admission_date') and field_exists('discharge_date')"
+  #   check: "discharge_date >= admission_date"
