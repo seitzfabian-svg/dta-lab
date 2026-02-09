@@ -24,8 +24,7 @@ MSG_AGENCY = "00"
 
 st.set_page_config(page_title="DTA Experte – Ausbaustufe 1 (Testdatei Generator)", layout="wide")
 st.title("🚀 DTA Experte – Ausbaustufe 1 (Testdatei Generator) ")
-st.caption(" TP4a-Dateien können erzeugt werden: AUFN/ENTL/RECH sind synthetisch befüllt und konsistent (gleicher Fall). 
-Alle anderen Nachrichtentypen werden leer erzeugt (nur FKT).")
+st.caption(" TP4a-Dateien können erzeugt werden: AUFN/ENTL/RECH sind synthetisch befüllt und konsistent (gleicher Fall). Alle anderen Nachrichtentypen werden leer erzeugt (nur FKT).")
 st.divider()
 
 # -----------------------------
