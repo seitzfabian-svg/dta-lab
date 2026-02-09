@@ -22,8 +22,8 @@ MSG_VERSION = "16"
 MSG_RELEASE = "000"
 MSG_AGENCY = "00"
 
-st.set_page_config(page_title="DTA Lab – TP4a EDIFACT Generator", layout="wide")
-st.title("🚀 DTA Lab – TP4a EDIFACT Generator (V4)")
+st.set_page_config(page_title="DTA Experte – Ausbaustufe 1 (Testdatei Generator)", layout="wide")
+st.title("🚀 DTA Experte – Ausbaustufe 1 (Testdatei Generator) ")
 st.caption("AUFN/ENTL/RECH sind synthetisch befüllt und konsistent (gleicher Fall). Alle anderen Typen werden leer erzeugt (nur FKT).")
 st.divider()
 
