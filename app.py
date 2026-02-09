@@ -18,15 +18,13 @@ ALL_MSG_TYPES = [
     "ANFM", "ZAHL", "ZAAO", "SAMU", "INKA", "KAIN", "FEHL"
 ]
 
-# UNH S009 Beispiel: 'AUFN:16:000:00' (Anlage 4) :contentReference[oaicite:2]{index=2}
 MSG_VERSION = "16"
 MSG_RELEASE = "000"
 MSG_AGENCY = "00"
 
 st.set_page_config(page_title="DTA Lab – TP4a EDIFACT Generator", layout="wide")
-st.title("🚀 DTA Lab – TP4a EDIFACT Generator (V3)")
-st.caption("AUFN ist jetzt inhaltlich nach Anlage 1 befüllt (synthetisch). Alle anderen Typen bleiben vorerst generisch/Platzhalter.")
-
+st.title("🚀 DTA Lab – TP4a EDIFACT Generator (V4)")
+st.caption("AUFN/ENTL/RECH sind synthetisch befüllt und konsistent (gleicher Fall). Alle anderen Typen werden leer erzeugt (nur FKT).")
 st.divider()
 
 # -----------------------------
@@ -37,17 +35,13 @@ def only_digits(s: str) -> str:
 
 def pad5(n: int) -> str:
     n = int(n)
-    if n <= 0:
-        n = 1
-    if n > 99999:
+    if n <= 0 or n > 99999:
         n = 1
     return f"{n:05d}"
 
 def pad2(n: int) -> str:
     n = int(n)
-    if n <= 0:
-        n = 1
-    if n > 99:
+    if n <= 0 or n > 99:
         n = 1
     return f"{n:02d}"
 
@@ -57,117 +51,301 @@ def seg(*parts: str) -> str:
 def yymmdd_hhmm(now: datetime):
     return now.strftime("%y%m%d"), now.strftime("%H%M")
 
-def rand_digits(n: int) -> str:
-    return "".join(random.choice(string.digits) for _ in range(n))
+def rand_digits(n: int, rnd: random.Random | None = None) -> str:
+    r = rnd or random
+    return "".join(r.choice(string.digits) for _ in range(n))
 
-def rand_upper(n: int) -> str:
-    return "".join(random.choice(string.ascii_uppercase) for _ in range(n))
-
-def rand_upper_alnum(n: int) -> str:
+def rand_upper_alnum(n: int, rnd: random.Random | None = None) -> str:
+    r = rnd or random
     alphabet = string.ascii_uppercase + string.digits
-    return "".join(random.choice(alphabet) for _ in range(n))
+    return "".join(r.choice(alphabet) for _ in range(n))
 
-def rand_date(start: date, end: date) -> date:
+def rand_date(start: date, end: date, rnd: random.Random | None = None) -> date:
+    r = rnd or random
     delta = (end - start).days
-    return start + timedelta(days=random.randint(0, max(delta, 0)))
+    return start + timedelta(days=r.randint(0, max(delta, 0)))
 
 def make_appref_11(prefix="KRH") -> str:
-    # Anlage 4: 0026 Anwendungsreferenz = 11 Stellen Dateiname (Beispiel KRHxxxxxxxx) :contentReference[oaicite:3]{index=3}
     return (prefix + rand_upper_alnum(8))[:11].upper()
 
-def rand_gender() -> str:
-    return random.choice(["m", "w", "d"])
+def rand_gender(rnd: random.Random) -> str:
+    return rnd.choice(["m", "w", "d"])
 
-def rand_icd10() -> str:
-    # synthetische ICD-ähnliche Diagnose, z.B. M50.8 (wie Beispiel) :contentReference[oaicite:4]{index=4}
-    letter = random.choice(string.ascii_uppercase)
-    return f"{letter}{random.randint(0,99):02d}.{random.randint(0,9)}"
+def rand_icd10(rnd: random.Random) -> str:
+    # synthetische ICD-ähnliche Diagnose z.B. M50.8
+    letter = rnd.choice(string.ascii_uppercase)
+    return f"{letter}{rnd.randint(0,99):02d}.{rnd.randint(0,9)}"
+
+def fmt_amount(amount: float) -> str:
+    # EDIFACT nutzt Dezimalzeichen Komma (Anlage 1 Hinweis)
+    s = f"{amount:.2f}".replace(".", ",")
+    # Kein Tausender-Trennzeichen
+    return s
 
 # -----------------------------
-# AUFN (Anlage 1) – Segment Builder
-# Reihenfolge im Beispiel: FKT, INV, NAD, DPV, AUF, EAD :contentReference[oaicite:5]{index=5}
+# Case-Model (Single Source of Truth für AUFN/ENTL/RECH)
+# -----------------------------
+def make_case(seed: int, sender_ik: str, receiver_ik: str) -> dict:
+    rnd = random.Random(seed)
+    today = date.today()
+
+    geb = rand_date(date(today.year - 80, 1, 1), date(today.year - 1, 12, 31), rnd)
+    aufnahme = rand_date(date(today.year - 1, 1, 1), today, rnd)
+    entlass = aufnahme + timedelta(days=rnd.randint(1, 14))
+
+    versichertenart = "1"
+    besonderer_personenkreis = rnd.choice(["00", "04", "09"])
+    dmp = rnd.choice(["00", "01", "02"])
+    gueltigkeit_kk = f"{rnd.randint(1,12):02d}{str(today.year)[-2:]}"  # MMJJ
+    kh_kennz = f"{rnd.choice(['A','B','C'])}{rnd.randint(10,99)}-{rand_digits(5, rnd)}"
+
+    nachname = rnd.choice(["Meier", "Müller", "Schmidt", "Wagner", "Fischer"])
+    vorname = rnd.choice(["Hugo", "Lena", "Mia", "Paul", "Noah"])
+
+    fachabteilung = rnd.choice(["0700", "0100", "0200", "1100"])
+    aufnahmezeit = f"{rnd.randint(0,23):02d}{rnd.randint(0,59):02d}"
+    entlasszeit = f"{rnd.randint(0,23):02d}{rnd.randint(0,59):02d}"
+
+    # RECH: Entgeltpositionen (ENT) + ggf. Zuzahlung (ZLG)
+    ent_positions = []
+    n_pos = rnd.randint(1, 3)
+    for i in range(n_pos):
+        entgeltart = f"{rnd.randint(0, 99999999):08d}"   # Schlüssel 4 (an8) – synthetisch 8-stellig
+        einzelbetrag = round(rnd.uniform(150.0, 2500.0), 2)
+        anzahl = rnd.randint(1, 5)
+        ent_positions.append({
+            "entgeltart": entgeltart,
+            "einzelbetrag": einzelbetrag,
+            "von": aufnahme.strftime("%Y%m%d"),
+            "bis": entlass.strftime("%Y%m%d"),
+            "anzahl": anzahl,
+        })
+
+    # Optional Zuzahlung
+    zlg_amount = round(rnd.uniform(0.0, 100.0), 2)
+    zlg = {
+        "amount": zlg_amount,
+        "kennz": rnd.choice(["0", "1"])  # Schlüssel 15 – synthetisch
+    } if zlg_amount > 0.0 and rnd.random() < 0.6 else None
+
+    # REC-5 = Summe(ENT-2 * ENT-5) ./. ZLG-1 (Hinweis in Anlage 1)
+    rec_sum = sum(p["einzelbetrag"] * p["anzahl"] for p in ent_positions)
+    if zlg:
+        rec_sum = max(0.0, rec_sum - zlg["amount"])
+    rec_sum = round(rec_sum, 2)
+
+    # Rechnung
+    rechnungsdatum = entlass + timedelta(days=rnd.randint(0, 5))
+    rechnungsnummer = f"R{today.year}{rand_digits(8, rnd)}"[:20]
+    rechnungsart = rnd.choice(["01", "02"])  # Schlüssel 11 – synthetisch (z.B. 01/02)
+    waehrung = "EUR"  # Schlüssel 18
+
+    return {
+        "seed": seed,
+        "sender_ik": sender_ik,
+        "receiver_ik": receiver_ik,
+
+        # INV / NAD
+        "kvnr12": rand_digits(12, rnd),
+        "versichertenart": versichertenart,
+        "besonderer_personenkreis": besonderer_personenkreis,
+        "dmp": dmp,
+        "gueltigkeit_kk": gueltigkeit_kk,
+        "kh_kennz": kh_kennz,
+        "nachname": nachname,
+        "vorname": vorname,
+        "geschlecht": rand_gender(rnd),
+        "gebdat": geb.strftime("%Y%m%d"),
+
+        # Aufenthalt
+        "aufnahme_datum": aufnahme.strftime("%Y%m%d"),
+        "aufnahme_zeit": aufnahmezeit,
+        "entlass_datum": entlass.strftime("%Y%m%d"),
+        "entlass_zeit": entlasszeit,
+        "fachabteilung": fachabteilung,
+
+        # Diagnose
+        "dpv_icd": str(today.year),  # ICD-Version (an..6)
+        "aufnahmediag": rand_icd10(rnd),
+        "hauptdiag": rand_icd10(rnd),
+        "nebendiags": [rand_icd10(rnd) for _ in range(rnd.randint(0, 3))],
+
+        # RECH
+        "waehrung": waehrung,
+        "rechnungsnummer": rechnungsnummer,
+        "rechnungsdatum": rechnungsdatum.strftime("%Y%m%d"),
+        "rechnungsart": rechnungsart,
+        "ent_positions": ent_positions,
+        "zlg": zlg,
+        "rechnungsbetrag": rec_sum,
+    }
+
+# -----------------------------
+# Segment Builder (shared)
 # -----------------------------
 def build_fkt(process_code: str, laufnr2: str, sender_ik: str, receiver_ik: str) -> str:
-    # FKT+10+01+123456789+987654321' :contentReference[oaicite:6]{index=6}
     return seg("FKT", process_code, laufnr2, sender_ik, receiver_ik)
 
-def build_inv_aufn(kvnr12: str, versichertenart: str, besonderer_personenkreis: str, dmp: str, gueltigkeit_kk: str, kh_kennz: str) -> str:
-    # INV+123456789012+1+04+01+2312+A95-12345' :contentReference[oaicite:7]{index=7}
-    return seg("INV", kvnr12, versichertenart, besonderer_personenkreis, dmp, gueltigkeit_kk, kh_kennz)
+def build_inv(case: dict) -> str:
+    # INV: für AUFN/ENTL/RECH identisch nutzbar (Mindestfelder + KH-Kennz)
+    return seg(
+        "INV",
+        case["kvnr12"],
+        case["versichertenart"],
+        case["besonderer_personenkreis"],
+        case["dmp"],
+        case["gueltigkeit_kk"],
+        case["kh_kennz"],
+    )
 
-def build_nad(nachname: str, vorname: str, geschlecht: str, gebdat_yyyymmdd: str) -> str:
-    # NAD+Meier+Hugo+m+20030101' :contentReference[oaicite:8]{index=8}
-    return seg("NAD", nachname, vorname, geschlecht, gebdat_yyyymmdd)
+def build_nad(case: dict) -> str:
+    return seg("NAD", case["nachname"], case["vorname"], case["geschlecht"], case["gebdat"])
 
-def build_dpv(jahr: str) -> str:
-    # DPV+2023' :contentReference[oaicite:9]{index=9}
-    return seg("DPV", jahr)
+def build_dpv_icd(case: dict) -> str:
+    # DPV+2025'
+    return seg("DPV", case["dpv_icd"])
 
+def build_sta(case: dict) -> str:
+    # STA ist bei ENTL und RECH Muss (99x möglich)
+    # Standortnummer an9 – synthetisch "001"
+    standortnr = "001"
+    ende = case["entlass_datum"]
+    ende_time = case["entlass_zeit"]
+    return seg("STA", standortnr, ende, ende_time)
+
+# -----------------------------
+# AUFN (Anlage 1) – Segment Builder (wie bei dir, aber aus Case)
+# -----------------------------
 def build_auf(aufnahmedatum: str, aufnahmezeit_hhmm: str, aufnahmegrund: str, fachabteilung: str, vorauss_entlass: str, einweiser_ik: str) -> str:
-    # Beispiel aus Anlage 1:
-    # AUF+20231001+1120+0101+0700+20231009+++123456789' :contentReference[oaicite:10]{index=10}
-    # Wir bilden die Struktur so nach, inkl. der drei leeren Elemente vor der letzten IK ( "+++" ).
+    # AUF+YYYYMMDD+HHMM+0101+0700+YYYYMMDD+++IK'
     return seg("AUF", aufnahmedatum, aufnahmezeit_hhmm, aufnahmegrund, fachabteilung, vorauss_entlass, "", "", einweiser_ik)
 
 def build_ead(aufnahmediagnose: str) -> str:
-    # EAD+M50.8:' :contentReference[oaicite:11]{index=11}
     return seg("EAD", f"{aufnahmediagnose}:")
 
-# -----------------------------
-# Generic placeholder payload (für alle außer AUFN erstmal)
-# -----------------------------
-def build_generic_payload(msg_type: str, sender_ik: str, receiver_ik: str, process_code: str, laufnr2: str) -> list[str]:
-    now = datetime.now()
-    dtm_ccyymmdd = now.strftime("%Y%m%d")
-    business_ref = f"SYN-{msg_type}-{rand_upper_alnum(6)}"
-    case_no = f"FALL-{rand_digits(5)}"
-    kvnr = rand_digits(12)
-
-    payload = []
-    payload.append(build_fkt(process_code, laufnr2, sender_ik, receiver_ik))
-    payload.append(seg("BGM", "00", business_ref, "9"))
-    payload.append(seg("DTM", f"137:{dtm_ccyymmdd}:102"))
-    payload.append(seg("ZSG", msg_type, sender_ik, receiver_ik, case_no, kvnr))  # Platzhalter
-    return payload
-
-def build_aufn_payload(sender_ik: str, receiver_ik: str, process_code: str, laufnr2: str) -> list[str]:
-    # Synthetische, plausible Inhalte – ohne reale Daten
-    today = date.today()
-    geb = rand_date(date(today.year - 80, 1, 1), date(today.year - 1, 12, 31))
-    aufnahme = rand_date(date(today.year - 1, 1, 1), today)
-    entlass = aufnahme + timedelta(days=random.randint(1, 14))
-
-    kvnr12 = rand_digits(12)
-    versichertenart = "1"
-    besonderer_personenkreis = random.choice(["00", "04", "09"])
-    dmp = random.choice(["00", "01", "02"])
-    gueltigkeit_kk = f"{random.randint(1,12):02d}{str(today.year)[-2:]}"  # MMJJ wie 2312 im Beispiel
-    kh_kennz = f"{random.choice(['A','B','C'])}{random.randint(10,99)}-{rand_digits(5)}"
-
-    nachname = random.choice(["Meier", "Müller", "Schmidt", "Wagner", "Fischer"])
-    vorname = random.choice(["Hugo", "Lena", "Mia", "Paul", "Noah"])
-    geschlecht = rand_gender()
-    gebdat = geb.strftime("%Y%m%d")
-
-    dpv_jahr = str(today.year)
-
-    aufnahmezeit = f"{random.randint(0,23):02d}{random.randint(0,59):02d}"
-    aufnahmegrund = "0101"
-    fachabteilung = random.choice(["0700", "0100", "0200", "1100"])
-    vorauss_entlass = entlass.strftime("%Y%m%d")
-    einweiser_ik = sender_ik  # synthetisch: wir nehmen Sender-IK
-
-    diag = rand_icd10()
-
+def build_aufn_payload(case: dict, process_code: str, laufnr2: str) -> list[str]:
     payload = [
-        build_fkt(process_code, laufnr2, sender_ik, receiver_ik),
-        build_inv_aufn(kvnr12, versichertenart, besonderer_personenkreis, dmp, gueltigkeit_kk, kh_kennz),
-        build_nad(nachname, vorname, geschlecht, gebdat),
-        build_dpv(dpv_jahr),
-        build_auf(aufnahme.strftime("%Y%m%d"), aufnahmezeit, aufnahmegrund, fachabteilung, vorauss_entlass, einweiser_ik),
-        build_ead(diag),
+        build_fkt(process_code, laufnr2, case["sender_ik"], case["receiver_ik"]),
+        build_inv(case),
+        build_nad(case),
+        build_dpv_icd(case),
+        build_auf(
+            case["aufnahme_datum"],
+            case["aufnahme_zeit"],
+            "0101",
+            case["fachabteilung"],
+            case["entlass_datum"],   # vorauss. Entlassung = echte Entlassung im synthetischen Modell
+            case["sender_ik"],       # Einweiser IK synthetisch = Sender IK
+        ),
+        build_ead(case["aufnahmediag"]),
     ]
     return payload
+
+# -----------------------------
+# ENTL (Anlage 1) – Minimal fachlich korrekt (FKT, INV, NAD, STA, DPV, DAU, ETL, NDG*)
+# -----------------------------
+def build_dau(case: dict) -> str:
+    # DAU+Aufnahmetag+Entlassungstag'
+    return seg("DAU", case["aufnahme_datum"], case["entlass_datum"])
+
+def build_etl(case: dict) -> str:
+    # ETL: Tag, Uhrzeit, Grund (an3), Fachabteilung, Hauptdiagnose (Datenelementgruppe -> hier "ICD:")
+    grund = "001"  # Schlüssel 5 – synthetisch an3
+    return seg("ETL", case["entlass_datum"], case["entlass_zeit"], grund, case["fachabteilung"], f"{case['hauptdiag']}:")
+
+def build_ndg(icd: str) -> str:
+    return seg("NDG", f"{icd}:")
+
+def build_entl_payload(case: dict, process_code: str, laufnr2: str) -> list[str]:
+    # Minimalregeln
+    if case["entlass_datum"] < case["aufnahme_datum"]:
+        raise ValueError("ENTL: Entlassdatum < Aufnahmedatum")
+
+    payload = [
+        build_fkt(process_code, laufnr2, case["sender_ik"], case["receiver_ik"]),
+        build_inv(case),
+        build_nad(case),
+        build_sta(case),
+        build_dpv_icd(case),
+        build_dau(case),
+        build_etl(case),
+    ]
+    for nd in case["nebendiags"]:
+        payload.append(build_ndg(nd))
+    return payload
+
+# -----------------------------
+# RECH (Anlage 1) – Minimal fachlich korrekt
+# Muss u.a.: FKT, INV, NAD, STA, CUX, REC, FAB (>=1), ENT (>=1)
+# REC-5 muss Summe(ENT-2*ENT-5) ./. ZLG-1 sein
+# -----------------------------
+def build_cux(case: dict) -> str:
+    # CUX+EUR'
+    return seg("CUX", case["waehrung"])
+
+def build_rec(case: dict) -> str:
+    # REC Felder (gemäß Anlage 1):
+    # 1 Rechnungsnummer (M)
+    # 2 Rechnungsdatum (M)
+    # 3 Rechnungsart (M)
+    # 4 Aufnahmetag (M)
+    # 5 Rechnungsbetrag (M)
+    # 6 Debitoren-Kontonr (K) -> leer
+    # 7 Referenznummer KH (K) -> leer
+    # 8 IK KH Zahlungsweg (K) -> leer
+    return seg(
+        "REC",
+        case["rechnungsnummer"],
+        case["rechnungsdatum"],
+        case["rechnungsart"],
+        case["aufnahme_datum"],
+        fmt_amount(case["rechnungsbetrag"]),
+    )
+
+def build_zlg(case: dict) -> str:
+    # ZLG ist Kann, aber wenn vorhanden: Betrag + Kennzeichen
+    z = case["zlg"]
+    return seg("ZLG", fmt_amount(z["amount"]), z["kennz"])
+
+def build_fab(case: dict) -> str:
+    # FAB+0700'
+    return seg("FAB", case["fachabteilung"])
+
+def build_ent(pos: dict) -> str:
+    # ENT+Entgeltart+Entgeltbetrag+von+bis+anzahl'
+    return seg(
+        "ENT",
+        pos["entgeltart"],
+        fmt_amount(pos["einzelbetrag"]),
+        pos["von"],
+        pos["bis"],
+        str(pos["anzahl"]),
+    )
+
+def build_rech_payload(case: dict, process_code: str, laufnr2: str) -> list[str]:
+    payload = [
+        build_fkt(process_code, laufnr2, case["sender_ik"], case["receiver_ik"]),
+        build_inv(case),
+        build_nad(case),
+        build_sta(case),
+        build_cux(case),
+        build_rec(case),
+    ]
+    if case["zlg"]:
+        payload.append(build_zlg(case))
+
+    # Muss: mind. 1x FAB und 1x ENT
+    payload.append(build_fab(case))
+    for p in case["ent_positions"]:
+        payload.append(build_ent(p))
+
+    return payload
+
+# -----------------------------
+# Empty payload for all other message types (minimal: nur FKT)
+# -----------------------------
+def build_empty_payload(sender_ik: str, receiver_ik: str, process_code: str, laufnr2: str) -> list[str]:
+    return [build_fkt(process_code, laufnr2, sender_ik, receiver_ik)]
 
 # -----------------------------
 # EDIFACT file builder
@@ -190,25 +368,26 @@ def build_edifact_file(
     if include_una:
         lines.append("UNA:+.? '")
 
-    # UNB Pflichtfelder (Anlage 4) :contentReference[oaicite:12]{index=12}
     lines.append(seg("UNB", "UNOC:3", sender_ik, receiver_ik, f"{d}:{t}", interchange_ref_5, "", app_ref_11))
-
-    # UNH (Anlage 4) :contentReference[oaicite:13]{index=13}
     lines.append(seg("UNH", msg_ref_5, f"{msg_type}:{MSG_VERSION}:{MSG_RELEASE}:{MSG_AGENCY}"))
 
-    # Payload
+    # Case-Seed: sorgt dafür, dass AUFN/ENTL/RECH für dieselbe (Interchange,msg_ref) Kombi konsistent sind
+    seed = int(interchange_ref_5) * 100000 + int(msg_ref_5)
+    case = make_case(seed, sender_ik, receiver_ik)
+
     if msg_type == "AUFN":
-        payload = build_aufn_payload(sender_ik, receiver_ik, process_code, laufnr2)  # Anlage 1 AUFN :contentReference[oaicite:14]{index=14}
+        payload = build_aufn_payload(case, process_code, laufnr2)
+    elif msg_type == "ENTL":
+        payload = build_entl_payload(case, process_code, laufnr2)
+    elif msg_type == "RECH":
+        payload = build_rech_payload(case, process_code, laufnr2)
     else:
-        payload = build_generic_payload(msg_type, sender_ik, receiver_ik, process_code, laufnr2)
+        payload = build_empty_payload(sender_ik, receiver_ik, process_code, laufnr2)
 
     lines.extend(payload)
 
-    # UNT: Anzahl Segmente von UNH bis UNT inkl. (Anlage 4) :contentReference[oaicite:15]{index=15}
     seg_count = 1 + len(payload) + 1
     lines.append(seg("UNT", str(seg_count), msg_ref_5))
-
-    # UNZ: Anzahl Nachrichten + Ref wie UNB (Anlage 4) :contentReference[oaicite:16]{index=16}
     lines.append(seg("UNZ", "1", interchange_ref_5))
 
     return "\n".join(lines) + "\n"
@@ -340,6 +519,11 @@ with colY:
 
 st.divider()
 st.info("""
-AUFN ist jetzt strukturell nach Anlage 1 umgesetzt (FKT/INV/NAD/DPV/AUF/EAD).
-Nächster Schritt: AUFN-Validierung (Pflicht/Kann je Feld) + Fehlerszenarien-Generator.
+Status:
+- AUFN / ENTL / RECH: synthetisch befüllt, fachlich plausibel, konsistent über denselben Case-Seed.
+- Alle anderen Nachrichtentypen: leer (nur FKT).
+Nächster Ausbau:
+- Szenario-Generator (AUFN+ENTL+RECH in einem ZIP pro Fall)
+- Validierungs-/Fehler-Flags je Nachricht
+- Weitere Verfahren schrittweise nachziehen (Case-first Architektur)
 """)
